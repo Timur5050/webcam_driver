@@ -1,0 +1,1 @@
+savedcmd_/home/stukan/Documents/important/projects/webcam_driver/Module.symvers :=  scripts/mod/modpost -M -m -a      -o /home/stukan/Documents/important/projects/webcam_driver/Module.symvers -T /home/stukan/Documents/important/projects/webcam_driver/modules.order -i Module.symvers -e 

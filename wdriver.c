@@ -80,7 +80,10 @@ static int webcam_logger_probe(struct usb_interface *interface, const struct usb
         if(usb_endpoint_xfer_isoc(temp_desc))
         {
             dev->ep = &cur_alt->endpoint[i];
-            pr_info(DRV_NAME " : found isoc ep, ep num : %d\n", usb_endpoint_num(&dev->ep->desc));
+            pr_info(DRV_NAME " : found isoc ep, type: 0x%x, address: 0x%02x, maxsize: %d\n",
+                dev->ep->desc.bmAttributes,
+                dev->ep->desc.bEndpointAddress,
+                le16_to_cpu(dev->ep->desc.wMaxPacketSize));
             if (usb_endpoint_dir_in(&dev->ep->desc)) {
                 pr_info(DRV_NAME ": that endpoint is IN type\n");
             } else if (usb_endpoint_dir_out(&dev->ep->desc)) {
