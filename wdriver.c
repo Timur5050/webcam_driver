@@ -43,7 +43,7 @@ static int webcam_logger_probe(struct usb_interface *interface, const struct usb
     dev->udev = usb_get_dev(udev);
     dev->interface = interface;
 
-    for(i = 0; i < dev->interace->num_altsetting; i++)
+    for(i = 0; i < dev->interface->num_altsetting; i++)
     {
         pr_info(DRV_NAME " : altset num : %d\n", i);
         struct usb_host_interface *temp = &dev->interface->altsetting[i];
