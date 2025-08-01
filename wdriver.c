@@ -1,0 +1,56 @@
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/usb.h>
+#include <linux/slab.h>
+
+
+#define VENDOR_ID 0x1b3f
+#define DEVICE_ID 0x2247
+#define DRV_NAME "webcam_driver"
+
+
+static struct webcam_device_id webcam_logger_table[] = {
+    { USB_DEVICE_AND_INTERFACE_INFO(VENDOR_ID, DEVICE_ID, USB_CLASS_VIDEO, 1, 0) },
+    {}
+};
+MODULE_DEVICE_TABLE(usb, webcam_logger_table);
+
+struct webcam_logger {
+    struct usb_device *udev;
+    struct usb_interface *interface;
+    struct usb_endpoint_descriptor *ep_desc;
+    unsigned char *data;
+    struct urb *urb;
+};
+
+static webcam_logger_probe(struct usb_interface *interface, const struct usb_device_id *id)
+{
+    struct usb_device *udev = interface_to_usbdev(interface);
+    struct webcam_logger *dev;
+    int retval = 0;
+    int i;
+
+    pr_info(DRV_NAME " probe called for device : %s:%s\n",
+            udev->manufacturer ? udev->manufacturer : "Unknown",
+            udev->product ? udev->product : "Unknown");
+    
+    return retval;
+}
+
+static void webcam_logger_disconnect(static usb_interface *interface)
+{
+    pr_info(DRV_NAME " device successfullt disconnected\n");
+}
+
+static struct webcam_driver webcam_logger_driver = {
+    .name = DRV_NAME,
+    .id_table = webcam_logger_table,
+    .probe = webcam_logger_probe,
+    .disconnect = webcam_logger_disconnect,
+};
+
+module_usb_driver(webcam_logger_driver);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Timur5050");
+MODULE_DESCRIPTION("Simple USB WEBCAM logger driver");
