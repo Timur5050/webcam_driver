@@ -9,7 +9,7 @@
 #define DRV_NAME "webcam_driver"
 
 
-static struct webcam_device_id webcam_logger_table[] = {
+static struct usb_device_id webcam_logger_table[] = {
     { USB_DEVICE_AND_INTERFACE_INFO(VENDOR_ID, DEVICE_ID, USB_CLASS_VIDEO, 1, 0) },
     {}
 };
@@ -23,7 +23,7 @@ struct webcam_logger {
     struct urb *urb;
 };
 
-static webcam_logger_probe(struct usb_interface *interface, const struct usb_device_id *id)
+static int webcam_logger_probe(struct usb_interface *interface, const struct usb_device_id *id)
 {
     struct usb_device *udev = interface_to_usbdev(interface);
     struct webcam_logger *dev;
@@ -37,12 +37,12 @@ static webcam_logger_probe(struct usb_interface *interface, const struct usb_dev
     return retval;
 }
 
-static void webcam_logger_disconnect(static usb_interface *interface)
+static void webcam_logger_disconnect(struct usb_interface *interface)
 {
     pr_info(DRV_NAME " device successfullt disconnected\n");
 }
 
-static struct webcam_driver webcam_logger_driver = {
+static struct usb_driver webcam_logger_driver = {
     .name = DRV_NAME,
     .id_table = webcam_logger_table,
     .probe = webcam_logger_probe,
