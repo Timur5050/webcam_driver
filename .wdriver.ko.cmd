@@ -1,1 +1,0 @@
-savedcmd_/home/stukan/Documents/important/projects/webcam_driver/wdriver.ko := ld -r -m elf_x86_64 -z noexecstack --no-warn-rwx-segments --build-id=sha1  -T scripts/module.lds -o /home/stukan/Documents/important/projects/webcam_driver/wdriver.ko /home/stukan/Documents/important/projects/webcam_driver/wdriver.o /home/stukan/Documents/important/projects/webcam_driver/wdriver.mod.o

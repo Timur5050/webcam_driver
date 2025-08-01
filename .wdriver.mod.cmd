@@ -1,1 +1,0 @@
-savedcmd_/home/stukan/Documents/important/projects/webcam_driver/wdriver.mod := printf '%s\n'   wdriver.o | awk '!x[$$0]++ { print("/home/stukan/Documents/important/projects/webcam_driver/"$$0) }' > /home/stukan/Documents/important/projects/webcam_driver/wdriver.mod
