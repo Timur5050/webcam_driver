@@ -8,6 +8,10 @@
 #define DEVICE_ID 0x2247
 #define DRV_NAME "webcam_driver"
 
+// urb settings
+#define NUM_URBS                8
+#define NUM_PACKETS_PER_URB     32
+
 
 static struct usb_device_id webcam_logger_table[] = {
     { USB_DEVICE_AND_INTERFACE_INFO(VENDOR_ID, DEVICE_ID, USB_CLASS_VIDEO, 2, 0) },
@@ -15,13 +19,129 @@ static struct usb_device_id webcam_logger_table[] = {
 };
 MODULE_DEVICE_TABLE(usb, webcam_logger_table);
 
+
+struct webcam_urb {
+    struct urb *urb;
+    u8 *buffer;
+};
+
 struct webcam_logger {
     struct usb_device *udev;
     struct usb_interface *interface;
     struct usb_host_endpoint *ep;
     unsigned char *data;
-    struct urb *urb;
+    struct webcam_urb urbs[NUM_URBS];
 };
+
+static void urb_complete_handler(struct urb *urb)
+{
+    struct webcam_logger *dev = urb->context;
+
+    for(int i = 0; i < urb->number_of_packets;; i++)
+    {
+        struct usb_iso_packet_descriptor *desc = &urb->iso_frame_desc[i];
+
+        if(desc->status != 0)
+        {
+            pr_warn(DRV_NAME ": ISO packet %d error: %d\n", i, desc->status);
+            continue;
+        }
+
+        if(desc->actual_length > 0)
+        {
+            u8 *data = urb->transfer_buffer + desc->offset;
+            pr_info(DRV_NAME " got packet, num: [%d], len: %d, data: %*ph\n",
+                i, desc->actual_length, min(16, desc->actual_length), data);
+        }
+    }
+
+    int ret = usb_submit_urb(urb, GFP_ATOMIC);
+    if(ret)
+    {
+        pr_err(DRV_NAME, " : failed to resubmet: %d\n", ret);
+    }
+}
+
+
+int setup_iso_urbs(struct webcam_logger *dev)
+{
+    int i, j, ret;
+    int packet_size, buffer_size;
+    struct usb_device *udev = dev->udev;
+    struct usb_host_endpoint *ep = dev->ep;
+    int ep_addr = ep->desc.bEndpointAddress;
+
+    // 1. size of iso packet
+    packet_size = le16_to_cpu(ep->desc.wMaxPacketSize);
+    buffer_size = packet_size * NUM_PACKETS_PER_URB;
+
+    for(int i = 0; i < NUM_URBS; i++)
+    {
+        struct urb *urb;
+        unsigned char *buf;
+
+        // 2. alloc buffer for all packets in URB
+        buf = kmalloc(buffer_size, GFP_KERNEL);
+        if(!buf)
+        {
+            goto error;
+        }
+
+        // 3. usb creating
+        urb = usb_alloc_urb(NUM_PACKETS_PER_URB, GFP_KERNEL);
+        if(!urb)
+        {
+            kree(buf);
+            goto error;
+        }
+
+        // 4. fill URBS
+        urb->dev = udev;
+        urb->pipe = usb_rcvisocpipe(udev, ep_addr);
+        urb->interval = ep->desc.bInterval;
+        urb->transfer_flags = 0; // no DMA for now
+        urb->transfer_buffer = buf;
+        urb->transfer_buffer_length = buffer_size;
+        urb->complete = urb_complete_handler;
+        urb->context = dev;
+        urb->number_of_packets = NUM_PACKETS_PER_URB;
+
+        for(j = 0; j < NUM_PACKETS_PER_URB; j++)
+        {
+            urb->iso_frame_desc[j].offset = j * packet_size; // offset in bytes (where to write that packet)
+            urb->iso_frame_desc[j].length = packet_size;     // how many bytes is allowed to write
+            // urb->iso_frame_desc[j].status                 // status after the end (success of getting or no)
+            // urb->iso_frame_desc[j].actual_length          // how many bytes really we got
+        }
+
+        // 5. save struct
+        dev->urbs[i].urb = urb;
+        dev->urbs[i].buffer = buf;
+
+        // 6. sent urb to host-contrller
+        ret = urb_submit_urb(urb, GFP_KERNEL);
+        if(ret)
+        {
+            pr_err(DRV_NAME, " : submit URB %d failed: %d\n", i, ret);
+            goto error;
+        }
+    }
+
+    return 0;
+
+error:
+    for(j = 0; j < NUM_URBS; j++)   
+    {
+        if(dev->urbs[j].urb)
+        {
+            usb_kill_urb(dev->urbs[j].urb);
+            usb_free_urb(dev->urbs[j].urb);
+        }
+        kfree(dev->urbs[j].buffer);
+    }
+    return -ENOMEM;
+}
+
 
 static int webcam_logger_probe(struct usb_interface *interface, const struct usb_device_id *id)
 {
@@ -93,6 +213,25 @@ static int webcam_logger_probe(struct usb_interface *interface, const struct usb
             }
         }
     }
+
+    if(!dev->ep)
+    {
+        pr_err(DRV_NAME " could not find interrupt IN endpoint\n");
+        retval = -ENODEV;
+    }
+
+    dev->data = kmalloc(usb_endpoint_maxp(dev->ep->desc));
+    if(!dev->data)
+    {
+        retval = -ENOMEM;
+    }
+
+    dev->urb = usb_alloc_urb(0, GFP_KERNEL);
+    if(!dev->urb)
+    {
+        retval = -ENOMEM;
+    }
+    
 
     return retval;
 }
