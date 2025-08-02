@@ -1,1 +1,0 @@
-savedcmd_/home/stukan/Documents/important/projects/webcam_driver/modules.order := {   echo /home/stukan/Documents/important/projects/webcam_driver/wdriver.o; :; } > /home/stukan/Documents/important/projects/webcam_driver/modules.order
