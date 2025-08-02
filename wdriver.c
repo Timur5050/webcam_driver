@@ -200,7 +200,7 @@ static int webcam_logger_probe(struct usb_interface *interface, const struct usb
         goto fail_free;
     }
 
-    dev->data = kmalloc(usb_endpoint_maxp(dev->ep->desc), GFP_KERNEL);
+    dev->data = kmalloc(usb_endpoint_maxp(&dev->ep->desc), GFP_KERNEL);
     if (!dev->data) {
         retval = -ENOMEM;
         goto fail_free;
