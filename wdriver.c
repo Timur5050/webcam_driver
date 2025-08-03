@@ -3,6 +3,12 @@
 #include <linux/usb.h>
 #include <linux/slab.h>
 
+#include <linux/fs.h>
+#include <linux/file.h>
+#include <linux/slab.h>
+#include <linux/err.h>
+#include <linux/uaccess.h>
+
 
 #define VENDOR_ID 0x1b3f
 #define DEVICE_ID 0x2247
@@ -11,6 +17,10 @@
 // urb settings
 #define NUM_URBS                8
 #define NUM_PACKETS_PER_URB     32
+
+// frame setting
+#define MAX_FRAME_SIZE (1024 * 1024) // 1 MB
+static int frame_counter = 0;
 
 
 static struct usb_device_id webcam_logger_table[] = {
@@ -31,34 +41,108 @@ struct webcam_logger {
     struct usb_host_endpoint *ep;
     unsigned char *data;
     struct webcam_urb urbs[NUM_URBS];
+
+    u8 *frame_buf;
+    int frame_len;
+    bool capturing;
+    u8 prev_byte;
 };
+
+static void save_to_file(const char *path, const u8 *data, size_t len)
+{
+    struct file *filp;
+    loff_t pos = 0;
+    ssize_t ret;
+
+    filp = filp_open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (IS_ERR(filp)) {
+        pr_err("webcam_driver: Cannot open file: %s, err = %ld\n", path, PTR_ERR(filp));
+        return;
+    }
+
+    // write directly from kernel buffer
+    ret = kernel_write(filp, data, len, &pos);
+    if (ret < 0)
+        pr_err("webcam_driver: Failed to write file %s, err = %zd\n", path, ret);
+
+    filp_close(filp, NULL);
+}
 
 static void urb_complete_handler(struct urb *urb)
 {
     struct webcam_logger *dev = urb->context;
-
+    
     for(int i = 0; i < urb->number_of_packets; i++)
     {
         struct usb_iso_packet_descriptor *desc = &urb->iso_frame_desc[i];
-
+        
         if(desc->status != 0)
         {
             pr_warn(DRV_NAME ": ISO packet %d error: %d\n", i, desc->status);
             continue;
         }
-
-        if(desc->actual_length > 0)
+        
+        if(desc->actual_length > 12) 
         {
             u8 *data = urb->transfer_buffer + desc->offset;
-            pr_info(DRV_NAME " got packet, num: [%d], len: %d, data: %*ph\n",
-                i, desc->actual_length, min(16, desc->actual_length), data);
+            
+            int header_len = 12;
+            u8 *payload = data + header_len;
+            int payload_len = desc->actual_length - header_len;
+            
+            pr_info(DRV_NAME " got payload, len: %d (total: %d)\n", payload_len, desc->actual_length);
+            
+            pr_info(DRV_NAME " UVC header: %02x %02x %02x %02x\n", 
+                    data[0], data[1], data[2], data[3]);
+            
+            if(payload_len > 0)
+            {
+                for(int j = 0; j < payload_len; j++)
+                {
+                    u8 byte = payload[j];
+                    
+                    // JPEG (FF D8)
+                    if(!dev->capturing && dev->prev_byte == 0xFF && byte == 0xD8)
+                    {
+                        dev->capturing = true;
+                        dev->frame_len = 0;
+                        dev->frame_buf[dev->frame_len++] = 0xFF;
+                        dev->frame_buf[dev->frame_len++] = 0xD8;
+                        pr_info(DRV_NAME ": JPEG start detected\n");
+                    }
+                    else if (dev->capturing)
+                    {
+                        if(dev->frame_len < MAX_FRAME_SIZE)
+                        {
+                            dev->frame_buf[dev->frame_len++] = byte;
+                        }
+                        
+                        // JPEG (FF D9)
+                        if(dev->prev_byte == 0xFF && byte == 0xD9)
+                        {
+                            dev->capturing = false;
+                            char filename[64];
+                            snprintf(filename, sizeof(filename), "/home/timur/test/frame_%03d.jpg", frame_counter++);
+                            save_to_file(filename, dev->frame_buf, dev->frame_len);
+                            pr_info(DRV_NAME ": JPEG end detected, saved %d bytes\n", dev->frame_len);
+                        }
+                    }
+                    dev->prev_byte = byte;
+                }
+            }
+        }
+        else if(desc->actual_length == 12)
+        {
+            // просто UVC заголовок без даних - ignore
+            u8 *header = urb->transfer_buffer + desc->offset;
+            // pr_info(DRV_NAME " UVC header only: %02x %02x\n", header[0], header[1]);
         }
     }
-
+    
     int ret = usb_submit_urb(urb, GFP_ATOMIC);
     if(ret)
     {
-        pr_err(DRV_NAME, " : failed to resubmet: %d\n", ret);
+        pr_err(DRV_NAME ": failed to resubmit URB: %d\n", ret);
     }
 }
 
@@ -206,6 +290,11 @@ static int webcam_logger_probe(struct usb_interface *interface, const struct usb
         goto fail_free;
     }
 
+    dev->frame_buf = kmalloc(MAX_FRAME_SIZE, GFP_KERNEL);
+    dev->frame_len = 0;
+    dev->capturing = false;
+    dev->prev_byte = 0;
+
     retval = setup_iso_urbs(dev);
     if (retval) {
         pr_err(DRV_NAME ": failed to setup urbs\n");
@@ -226,8 +315,28 @@ fail_free:
 
 static void webcam_logger_disconnect(struct usb_interface *interface)
 {
-    pr_info(DRV_NAME " device successfullt disconnected\n");
+    struct webcam_logger *dev = usb_get_intfdata(interface);
+
+    pr_info(DRV_NAME " device successfully disconnected\n");
+
+    if (!dev)
+        return;
+
+    for (int i = 0; i < NUM_URBS; i++) {
+        if (dev->urbs[i].urb) {
+            usb_kill_urb(dev->urbs[i].urb);
+            usb_free_urb(dev->urbs[i].urb);
+            kfree(dev->urbs[i].buffer);
+        }
+    }
+
+    kfree(dev->frame_buf);
+    kfree(dev->data);
+
+    usb_put_dev(dev->udev);
+    kfree(dev);
 }
+
 
 static struct usb_driver webcam_logger_driver = {
     .name = DRV_NAME,
